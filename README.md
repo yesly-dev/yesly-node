@@ -2,8 +2,7 @@
 
 The official Node.js library for the Yesly API.
 
-> Status: 0.1.0, not published yet. Covers API version `2026-10-01`. How to
-> publish it: [docs/publishing.md](docs/publishing.md).
+> Status: 0.1.0, not published yet. Covers API version `2026-10-01`.
 
 ## Install
 
@@ -94,7 +93,7 @@ reused on every retry; pass your own with `{ idempotencyKey }`. Creating an
 appointment is idempotent by `external_id` instead.
 
 ```js
-new Yesly({ apiKey, timeout: 10_000, maxRetries: 4, baseUrl: "https://api.dev.yesly.dev/v1" });
+new Yesly({ apiKey, timeout: 10_000, maxRetries: 4 });
 await yesly.appointments.cancel("apt_…", { reason: "Shop closed" }, { idempotencyKey: "cancel-ORD-48213" });
 ```
 
@@ -126,10 +125,9 @@ Smoke test against the real API with a test key (one call per resource, then
 clean-up):
 
 ```bash
-npm run build && YESLY_API_KEY=ysk_test_… YESLY_BASE_URL=https://api.dev.yesly.dev/v1 node scripts/smoke.mjs
+npm run build && YESLY_API_KEY=ysk_test_… node scripts/smoke.mjs
 ```
 
 ## Releasing
 
 Bump `version` in `package.json` and `src/version.ts`, then push a tag `v<version>`.
-First-time registration on npm: [docs/publishing.md](docs/publishing.md).

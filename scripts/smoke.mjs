@@ -1,6 +1,6 @@
 // Calls the real API with a test key: one call per resource, then cleans up.
 //
-//   YESLY_API_KEY=ysk_test_… YESLY_BASE_URL=https://api.dev.yesly.dev/v1 node scripts/smoke.mjs
+//   YESLY_API_KEY=ysk_test_… node scripts/smoke.mjs
 import Yesly, { YeslyError } from "../dist/index.js";
 
 const yesly = new Yesly();

@@ -110,3 +110,14 @@ test("reads the key from YESLY_API_KEY and tells the mode", async () => {
 test("VERSION matches package.json", () => {
   assert.equal(VERSION, JSON.parse(readFileSync(new URL("../package.json", import.meta.url))).version);
 });
+
+test("refuses a plain-HTTP base URL except for localhost, and does not follow redirects", async () => {
+  assert.throws(() => new Yesly("ysk_test_123", { baseUrl: "http://api.yesly.dev/v1" }), /must use https/);
+  assert.throws(() => new Yesly("ysk_test_123", { baseUrl: "not a url" }), /not a valid URL/);
+  for (const baseUrl of ["http://localhost:4010", "http://127.0.0.1:4010/v1", "http://[::1]:4010"]) {
+    assert.equal(new Yesly("ysk_test_123", { baseUrl }).baseUrl, baseUrl);
+  }
+  const f = fakeFetch([200, {}]);
+  await client(f).balance.retrieve();
+  assert.equal(f.calls[0].redirect, "manual");
+});

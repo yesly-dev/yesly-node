@@ -2,7 +2,7 @@
 export function fakeFetch(...answers) {
   const calls = [];
   const fn = async (url, init) => {
-    calls.push({ url: new URL(url), method: init.method, headers: init.headers, body: init.body ? JSON.parse(init.body) : undefined });
+    calls.push({ url: new URL(url), method: init.method, headers: init.headers, redirect: init.redirect, body: init.body ? JSON.parse(init.body) : undefined });
     const a = answers.shift();
     if (!a) throw new Error(`Unexpected request ${init.method} ${url}`);
     if (a instanceof Error) throw a;

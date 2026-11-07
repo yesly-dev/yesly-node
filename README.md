@@ -55,6 +55,8 @@ app.post("/yesly/webhook", express.raw({ type: "application/json" }), (req, res)
 `constructEvent` rejects deliveries more than five minutes old and accepts
 either signature during a secret roll. `Yesly.webhooks` works without an API
 key, and `generateTestHeader` signs a payload to test your handler.
+A delivery can arrive more than once, and a captured one stays valid for
+those five minutes, so skip events whose `id` you have already handled.
 
 ## Lists
 

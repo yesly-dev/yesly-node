@@ -7,7 +7,7 @@ import { VERSION } from "./version.js";
 export interface ClientOptions {
   /** Defaults to the `YESLY_API_KEY` environment variable. */
   apiKey?: string;
-  /** Defaults to `https://api.yesly.dev/v1`, or `YESLY_BASE_URL` when set. */
+  /** Defaults to `https://api.yesly.dev/v1`, or `YESLY_BASE_URL` when set. Must be HTTPS, except for localhost. */
   baseUrl?: string;
   /** `Yesly-Version` sent with every request. Defaults to the version this library was generated for. */
   apiVersion?: string;
@@ -49,7 +49,7 @@ export class Client {
   constructor(apiKey?: string | ClientOptions, options: ClientOptions = {}) {
     const o = typeof apiKey === "object" ? apiKey : { ...options, apiKey: apiKey ?? options.apiKey };
     this.#apiKey = o.apiKey ?? env("YESLY_API_KEY");
-    this.baseUrl = (o.baseUrl ?? env("YESLY_BASE_URL") ?? BASE_URL).replace(/\/+$/, "");
+    this.baseUrl = checkBaseUrl((o.baseUrl ?? env("YESLY_BASE_URL") ?? BASE_URL).replace(/\/+$/, ""));
     this.apiVersion = o.apiVersion ?? API_VERSION;
     this.timeout = o.timeout ?? 30_000;
     this.maxRetries = o.maxRetries ?? 2;
@@ -85,7 +85,8 @@ export class Client {
       const signals = [AbortSignal.timeout(timeout), ...(options.signal ? [options.signal] : [])];
       let res: Response;
       try {
-        res = await this.#fetch(url, { method: spec.method, headers, body, signal: AbortSignal.any(signals) });
+        // Redirects are not followed, so the API key is never sent to another URL.
+        res = await this.#fetch(url, { method: spec.method, headers, body, redirect: "manual", signal: AbortSignal.any(signals) });
       } catch (cause) {
         if (options.signal?.aborted) throw cause;
         if (attempt < maxRetries) {
@@ -114,6 +115,21 @@ export class Client {
       ).then((raw) => new Page<T>(raw, load));
     return new PagePromise<T>(() => load());
   }
+}
+
+/** The API key goes in every request, so the base URL must be HTTPS; plain HTTP only to this machine. */
+function checkBaseUrl(baseUrl: string): string {
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    throw new YeslyError("The base URL is not a valid URL.");
+  }
+  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
+    throw new YeslyError("The base URL must use https:// (http:// is only allowed for localhost).");
+  }
+  return baseUrl;
 }
 
 function env(name: string): string | undefined {

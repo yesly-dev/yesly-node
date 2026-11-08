@@ -102,6 +102,23 @@ export type Attempt = {
   sent_at: string;
   /** Cost of this attempt, in euros. */
   cost: number;
+  /**
+   * Calls only: what the call said and what it heard, in order. A
+   * customer turn has the recognised speech in `text` (empty for a
+   * silence) or the key pressed in `key`. Kept with the appointment and
+   * deleted with it.
+   */
+  transcript?: Array<TranscriptLine>;
+};
+
+/** One turn of a call. */
+export type TranscriptLine = {
+  speaker: "agent" | "customer";
+  /** What was said. `null` when the customer pressed a key. */
+  text: string | null;
+  /** The key the customer pressed, such as `1`. */
+  key: string | null;
+  at: string;
 };
 
 /** A visit, delivery or meeting Yesly confirms with your customer. Its `status` moves forward as the customer answers. */

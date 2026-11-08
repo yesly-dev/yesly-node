@@ -365,6 +365,19 @@ export type TimeFormat = "window" | "exact";
 /** `customer` (at the customer's address) or `location` (at one of your locations). */
 export type Place = "customer" | "location";
 
+/**
+ * When the first message goes out for appointments of a type: `days_before`
+ * and `at` ("the day before at 10:00", `0` for the same day), or
+ * `hours_before` (same-day services: "3 hours before"). Moved into your
+ * contact hours when it falls outside them.
+ */
+export type FirstContact = {
+  days_before: number;
+  at: string;
+} | {
+  hours_before: number;
+};
+
 /** What an appointment is. Sets how the time is shown and the instructions added to the message. */
 export type AppointmentType = {
   /** Your id for the type, such as `delivery`. Sent with each appointment. */
@@ -380,6 +393,8 @@ export type AppointmentType = {
   instructions: string | null;
   /** Whether the customer may ask for another date. */
   reschedulable: boolean;
+  /** When the first message goes out for this type, or `null` to use your account's setting. */
+  first_contact: FirstContact | null;
   created: string;
 };
 
@@ -395,6 +410,8 @@ export type AppointmentTypeCreate = {
   /** Optional instructions for the customer. */
   instructions?: string;
   reschedulable?: boolean;
+  /** Its own first message. Leave it out (or `null`) to use your account's setting. */
+  first_contact?: FirstContact | null;
 };
 
 export type AppointmentTypeUpdate = {
@@ -406,6 +423,8 @@ export type AppointmentTypeUpdate = {
   instructions?: string;
   /** Whether the customer may ask for another date. */
   reschedulable?: boolean;
+  /** Its own first message; `null` goes back to your account's setting. */
+  first_contact?: FirstContact | null;
 };
 
 export type AppointmentTypeList = {

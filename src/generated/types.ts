@@ -393,6 +393,8 @@ export type AppointmentType = {
   instructions: string | null;
   /** Whether the customer may ask for another date. */
   reschedulable: boolean;
+  /** Whether the customer may cancel. Off for deliveries such as a parcel or a mattress; then a "no" asks for another day (if reschedulable) or goes to your team. */
+  cancellable: boolean;
   /** When the first message goes out for this type, or `null` to use your account's setting. */
   first_contact: FirstContact | null;
   created: string;
@@ -410,6 +412,7 @@ export type AppointmentTypeCreate = {
   /** Optional instructions for the customer. */
   instructions?: string;
   reschedulable?: boolean;
+  cancellable?: boolean;
   /** Its own first message. Leave it out (or `null`) to use your account's setting. */
   first_contact?: FirstContact | null;
 };
@@ -423,6 +426,8 @@ export type AppointmentTypeUpdate = {
   instructions?: string;
   /** Whether the customer may ask for another date. */
   reschedulable?: boolean;
+  /** Whether the customer may cancel. */
+  cancellable?: boolean;
   /** Its own first message; `null` goes back to your account's setting. */
   first_contact?: FirstContact | null;
 };

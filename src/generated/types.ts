@@ -86,6 +86,60 @@ export type Answer = {
   at: string;
 };
 
+/** A free slot in your own system (live availability), as your system returns it. */
+export type AvailabilitySlot = {
+  /** Your id for the slot. Yesly sends it back in `availability.book`. */
+  id: string;
+  start: string;
+  end: string;
+  /** `exact` for a time (a doctor at 10:20), `window` for a range (an installer from 8 to 14). Default `exact`. */
+  kind?: "exact" | "window";
+  /** Who or what attends, when it matters to the customer. */
+  resource?: {
+    id?: string;
+    name?: string;
+  } | null;
+};
+
+/**
+ * What Yesly POSTs to your system's URL (live availability), signed with
+ * `Yesly-Signature` like webhooks. `availability.list` asks for free slots
+ * for the appointment between `from` and `to`; answer with
+ * AvailabilityListResponse. `availability.book` asks to book `slot.id`;
+ * answer with AvailabilityBookResponse, or `409` if it was just taken.
+ */
+export type AvailabilityRequest = {
+  /** Unique id, prefixed `avq_` (list) or `avb_` (book). */
+  id: string;
+  object: "availability_request";
+  type: "availability.list" | "availability.book";
+  mode: "live" | "test";
+  created: string;
+  data: {
+    appointment: Appointment;
+    /** On `availability.list`, the earliest start to offer. */
+    from?: string;
+    /** On `availability.list`, the latest start to offer. */
+    to?: string;
+    /** On `availability.list`, how many slots are shown at most. */
+    limit?: number;
+    /** On `availability.book`, the slot the customer picked. */
+    slot?: {
+      id: string;
+    };
+  };
+};
+
+export type AvailabilityListResponse = {
+  slots: Array<AvailabilitySlot>;
+};
+
+export type AvailabilityBookResponse = {
+  /** `false` (or a `409`) when the slot was just taken. */
+  booked: boolean;
+  slot?: AvailabilitySlot;
+};
+
 /** The customer's wish when there was no free slot to pick, or none suited them. */
 export type RescheduleRequest = {
   /** Up to 3 days that would suit them (`YYYY-MM-DD`, in your time zone). Empty when they just asked for another day. */

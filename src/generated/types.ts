@@ -18,8 +18,8 @@ export type Phone = string;
 /** A day (`YYYY-MM-DD`) or a time with offset. */
 export type DateOrDateTime = string;
 
-/** Contact channel. */
-export type Channel = "whatsapp" | "sms" | "voice";
+/** Contact channel. `email` needs `customer.email` on the appointment; without it the step is skipped. */
+export type Channel = "whatsapp" | "sms" | "voice" | "email";
 
 /**
  * Your own key-value pairs, returned unchanged. Up to 20 keys, keys up to
@@ -74,6 +74,8 @@ export type Customer = {
   /** Name used in the messages. A first name is enough. */
   name: string;
   phone: Phone;
+  /** Email for the `email` channel, lower-cased. `null` when there is none. */
+  email?: string | null;
 };
 
 /** The customer's answer. */
@@ -131,8 +133,8 @@ export type Appointment = {
   attempts: Array<Attempt>;
   /**
    * What this appointment has cost so far, in euros. WhatsApp 0.08 per
-   * message, SMS 0.15 per message, voice 0.30 per answered minute;
-   * unanswered calls are free.
+   * message, SMS 0.15 per message, email 0.01 per message, voice 0.30
+   * per answered minute; unanswered calls are free.
    */
   cost: number;
   /** Currency of `cost`. */
@@ -161,6 +163,8 @@ export type AppointmentCreate = {
     /** Name used in the messages. A first name is enough. */
     name: string;
     phone: Phone;
+    /** Email for the `email` channel. Optional. */
+    email?: string | null;
   };
   /** Override the channel order for this appointment, such as `["whatsapp", "voice"]`. Only channels enabled in your account. */
   channels?: Array<Channel>;
@@ -168,8 +172,8 @@ export type AppointmentCreate = {
 };
 
 /**
- * Send only what changes. Changing `slot` or `customer.phone` starts the
- * confirmation again.
+ * Send only what changes. Changing `slot`, `customer.phone` or
+ * `customer.email` starts the confirmation again.
  */
 export type AppointmentUpdate = {
   /** New appointment type id. */
@@ -186,6 +190,8 @@ export type AppointmentUpdate = {
     /** New name. */
     name?: string;
     phone?: Phone;
+    /** New email; `null` removes it. */
+    email?: string | null;
   };
   /** New channel order for this appointment. */
   channels?: Array<Channel>;
@@ -618,7 +624,7 @@ export type BalanceTransaction = {
   amount: number;
   /** Units charged, on `usage`. */
   quantity?: number;
-  /** `message` for WhatsApp and SMS, `minute` for voice. */
+  /** `message` for WhatsApp, SMS and email, `minute` for voice. */
   unit?: "message" | "minute";
   /** Id of the appointment charged, on `usage`. */
   appointment?: string;
@@ -658,12 +664,14 @@ export type AnalyticsSummary = {
     whatsapp?: number;
     sms?: number;
     voice?: number;
+    email?: number;
   };
   median_minutes_to_answer: number;
   usage: {
     whatsapp_messages?: number;
     sms_messages?: number;
     voice_minutes?: number;
+    email_messages?: number;
   };
   spend: {
     amount: number;

@@ -7,7 +7,7 @@ export const API_VERSION = "2026-10-01";
 export const BASE_URL = "https://api.yesly.dev/v1";
 
 /** Every webhook event type. */
-export const EVENT_TYPES = ["appointment.created","appointment.confirmed","appointment.rescheduled","appointment.cancelled","appointment.no_reply","message.sent","message.delivered","message.failed","call.started","call.completed","call.transferred","balance.low","balance.topped_up"] as const;
+export const EVENT_TYPES = ["appointment.created","appointment.confirmed","appointment.rescheduled","appointment.reschedule_requested","appointment.cancelled","appointment.no_reply","message.sent","message.delivered","message.failed","call.started","call.completed","call.transferred","balance.low","balance.topped_up"] as const;
 
 /** `live` or `test`, from the API key. */
 export type Mode = "live" | "test";
@@ -58,10 +58,11 @@ export type Error = {
  * - `in_progress`: Yesly is contacting the customer.
  * - `confirmed`: the customer will be there.
  * - `rescheduled`: the customer moved it to one of your free slots.
+ * - `reschedule_requested`: the customer wants another day and there was no free slot that suited them; `reschedule_request` says which days and when. Set the new `slot` and confirmation starts again.
  * - `cancelled`: cancelled by the customer or by you.
  * - `no_reply`: no answer on any channel. Your team should call.
  */
-export type AppointmentStatus = "scheduled" | "in_progress" | "confirmed" | "rescheduled" | "cancelled" | "no_reply";
+export type AppointmentStatus = "scheduled" | "in_progress" | "confirmed" | "rescheduled" | "reschedule_requested" | "cancelled" | "no_reply";
 
 /** `start` and `end` of the appointment. For exact-time types, `end` is `start` plus the type's duration. */
 export type AppointmentSlot = {
@@ -80,8 +81,18 @@ export type Customer = {
 
 /** The customer's answer. */
 export type Answer = {
-  result: "confirmed" | "rescheduled" | "cancelled";
+  result: "confirmed" | "rescheduled" | "reschedule_requested" | "cancelled";
   channel: Channel;
+  at: string;
+};
+
+/** The customer's wish when there was no free slot to pick, or none suited them. */
+export type RescheduleRequest = {
+  /** Up to 3 days that would suit them (`YYYY-MM-DD`, in your time zone). Empty when they just asked for another day. */
+  dates: Array<string>;
+  part_of_day: "morning" | "afternoon" | "any";
+  /** Anything else they wrote, up to 300 characters. */
+  note: string | null;
   at: string;
 };
 
@@ -144,6 +155,8 @@ export type Appointment = {
   first_contact_at: string | null;
   /** The customer's answer, or `null`. */
   answer: Answer | null;
+  /** What the customer would like instead, when they asked for another day without picking a slot, or `null`. */
+  reschedule_request: RescheduleRequest | null;
   /** Who cancelled, why and when, or `null`. */
   cancellation: Cancellation | null;
   /** Each contact attempt. */
@@ -397,6 +410,7 @@ export type LocationList = {
  * - `appointment.created`: created by API, import, CSV or in the dashboard.
  * - `appointment.confirmed`: the customer confirmed.
  * - `appointment.rescheduled`: the customer moved it to another slot.
+ * - `appointment.reschedule_requested`: the customer asked for another day; set the new slot.
  * - `appointment.cancelled`: cancelled by the customer or by you.
  * - `appointment.no_reply`: no channel got an answer.
  * - `message.sent`: a WhatsApp message or SMS left Yesly.
@@ -408,7 +422,7 @@ export type LocationList = {
  * - `balance.low`: the balance went below your alert threshold.
  * - `balance.topped_up`: a top-up was paid.
  */
-export type EventType = "appointment.created" | "appointment.confirmed" | "appointment.rescheduled" | "appointment.cancelled" | "appointment.no_reply" | "message.sent" | "message.delivered" | "message.failed" | "call.started" | "call.completed" | "call.transferred" | "balance.low" | "balance.topped_up";
+export type EventType = "appointment.created" | "appointment.confirmed" | "appointment.rescheduled" | "appointment.reschedule_requested" | "appointment.cancelled" | "appointment.no_reply" | "message.sent" | "message.delivered" | "message.failed" | "call.started" | "call.completed" | "call.transferred" | "balance.low" | "balance.topped_up";
 
 /** Events have the same shape whether they arrive by webhook or through List events. */
 export type EventBase = {
@@ -672,6 +686,7 @@ export type AnalyticsSummary = {
   outcomes: {
     confirmed?: number;
     rescheduled?: number;
+    reschedule_requested?: number;
     cancelled?: number;
     no_reply?: number;
     in_progress?: number;

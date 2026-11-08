@@ -11,7 +11,7 @@ async function usage() {
     slot: { start: "2026-11-13T09:00:00+01:00", end: "2026-11-13T11:00:00+01:00" },
     metadata: { order_id: "PV-18342", route_id: "BIO-07" },
   });
-  apt.status satisfies "scheduled" | "in_progress" | "confirmed" | "rescheduled" | "cancelled" | "no_reply";
+  apt.status satisfies "scheduled" | "in_progress" | "confirmed" | "rescheduled" | "reschedule_requested" | "cancelled" | "no_reply";
 
   for await (const a of yesly.appointments.list({ status: "no_reply", metadata: { route_id: "BIO-07" } })) a.external_id.toUpperCase();
   const page = await yesly.events.list({ limit: 10 });

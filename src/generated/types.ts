@@ -18,7 +18,23 @@ export type Phone = string;
 /** A day (`YYYY-MM-DD`) or a time with offset. */
 export type DateOrDateTime = string;
 
-/** Contact channel. `email` needs `customer.email` on the appointment; without it the step is skipped. */
+/**
+ * Contact channel.
+ *
+ * - `email` needs `customer.email`. Without it the step is not skipped:
+ *   in live mode the attempt is charged, fails with `no_email`, is
+ *   refunded (`adjustment`), fires `message.failed`, and the next
+ *   channel runs.
+ * - `voice` is a call that asks the customer to confirm, change the day
+ *   or cancel, offering only what the appointment type allows. Asking
+ *   for another day sends an SMS with a link to pick a day. That SMS is
+ *   not a separate attempt and fires no `message.*` event; it is charged
+ *   as an SMS `usage` transaction and added to the call attempt's
+ *   `cost`. No other channel is tried after it: if the customer picks
+ *   nothing before the call's wait ends, the appointment ends
+ *   `reschedule_requested` with a `note`. If the SMS cannot go out, it
+ *   ends `reschedule_requested` at once.
+ */
 export type Channel = "whatsapp" | "sms" | "voice" | "email";
 
 /**
@@ -42,7 +58,7 @@ export type Error = {
   error: {
     /** Error class, such as `invalid_request`, `authentication_failed`, `conflict` or `rate_limited`. */
     type: string;
-    /** Machine-readable reason, on validation errors, such as `phone_invalid` or `external_id_conflict`. */
+    /** Machine-readable reason, such as `phone_invalid` or `external_id_conflict`. Missing on `500` errors. */
     code?: string;
     /** The parameter at fault, on validation errors, such as `customer.phone`. */
     param?: string;
@@ -55,12 +71,12 @@ export type Error = {
 
 /**
  * - `scheduled`: created, waiting for `first_contact_at`.
- * - `in_progress`: Yesly is contacting the customer.
+ * - `in_progress`: Yesly is contacting the customer. Also where contact stopped because the balance did not cover the next message; it is not resumed.
  * - `confirmed`: the customer will be there.
- * - `rescheduled`: the customer moved it to one of your free slots.
- * - `reschedule_requested`: the customer wants another day and there was no free slot that suited them; `reschedule_request` says which days and when. Set the new `slot` and confirmation starts again.
+ * - `rescheduled`: the customer moved it to a free time (your published slots or your own system).
+ * - `reschedule_requested`: the customer wants another day and did not pick a free time: they proposed days, or asked on the call and did not pick a day from the SMS link. `reschedule_request` says what they would like. Set the new `slot` and confirmation starts again.
  * - `cancelled`: cancelled by the customer or by you.
- * - `no_reply`: no answer on any channel. Your team should call.
+ * - `no_reply`: no answer on any channel, or the call was transferred. Your team should call.
  */
 export type AppointmentStatus = "scheduled" | "in_progress" | "confirmed" | "rescheduled" | "reschedule_requested" | "cancelled" | "no_reply";
 
@@ -140,12 +156,12 @@ export type AvailabilityBookResponse = {
   slot?: AvailabilitySlot;
 };
 
-/** The customer's wish when there was no free slot to pick, or none suited them. */
+/** The customer's wish when they asked for another day without picking a free time. */
 export type RescheduleRequest = {
-  /** Up to 3 days that would suit them (`YYYY-MM-DD`, in your time zone). Empty when they just asked for another day. */
+  /** Up to 3 days that would suit them (`YYYY-MM-DD`, in your time zone). Empty when they just asked for another day, such as on a call. */
   dates: Array<string>;
   part_of_day: "morning" | "afternoon" | "any";
-  /** Anything else they wrote, up to 300 characters. */
+  /** Anything else they wrote, up to 500 characters. From a call, what the customer said, or a note that they asked on the call and did not pick a day. */
   note: string | null;
   at: string;
 };
@@ -163,9 +179,15 @@ export type Attempt = {
   /** Unique id, prefixed `att_`. */
   id: string;
   channel: Channel;
-  status: "queued" | "sent" | "delivered" | "read" | "answered" | "no_answer" | "failed" | "skipped";
-  sent_at: string;
-  /** Cost of this attempt, in euros. */
+  /**
+   * `queued` (not handed over yet), `sent`, `delivered`, `read`
+   * (WhatsApp), `answered`, `no_answer` (calls), `failed`, or
+   * `transferred` (calls passed to a location's phone).
+   */
+  status: "queued" | "sent" | "delivered" | "read" | "answered" | "no_answer" | "failed" | "transferred";
+  /** When it was handed to the provider. `null` while `queued` or when it failed before. */
+  sent_at: string | null;
+  /** Cost of this attempt, in euros. `0` for a message refused when sending (refunded). On a call, includes the SMS with the link to pick a day, if one was sent. */
   cost: number;
   /**
    * Calls only: what the call said and what it heard, in order. A
@@ -218,7 +240,10 @@ export type Appointment = {
   /**
    * What this appointment has cost so far, in euros. WhatsApp 0.08 per
    * message, SMS 0.15 per message, email 0.01 per message, voice 0.30
-   * per answered minute; unanswered calls are free.
+   * per started minute of a call that was picked up; unanswered calls
+   * are free. An SMS with the link to pick a day after a call adds
+   * 0.15. Messages refused when sending are refunded. In test mode it
+   * shows the message prices, but nothing is charged.
    */
   cost: number;
   /** Currency of `cost`. */
@@ -235,13 +260,13 @@ export type AppointmentCreate = {
   external_id: string;
   /** Appointment type id. Required if your account has more than one type. */
   type?: string;
-  /** Location id. Required when the type happens at one of your locations; otherwise optional, and used to pass calls to that location's phone. */
-  location?: string;
+  /** Location id, optional. For a type whose `place` is `location`, its name and address are shown in the email and on the answer page. */
+  location?: string | null;
   slot: {
     /** Start of the appointment or of the time window, with offset. */
     start: string;
-    /** End of the window. Leave it out for exact-time types; it is computed from the type's duration. */
-    end?: string;
+    /** End of the window, after `start`. Without it, `start` plus the type's `minutes` (60 if the account has no types). */
+    end?: string | null;
   };
   customer: {
     /** Name used in the messages. A first name is enough. */
@@ -250,25 +275,25 @@ export type AppointmentCreate = {
     /** Email for the `email` channel. Optional. */
     email?: string | null;
   };
-  /** Override the channel order for this appointment, such as `["whatsapp", "voice"]`. Only channels enabled in your account. */
+  /** Override the channel order for this appointment, such as `["whatsapp", "voice"]`. At least one, without repeats. Without it, your account's channels. */
   channels?: Array<Channel>;
   metadata?: Metadata;
 };
 
 /**
- * Send only what changes. Changing `slot`, `customer.phone` or
- * `customer.email` starts the confirmation again.
+ * Send only what changes. Changing the slot start, `customer.phone`,
+ * `customer.email` or `channels` starts the confirmation again.
  */
 export type AppointmentUpdate = {
   /** New appointment type id. */
   type?: string;
-  /** New location id. */
-  location?: string;
+  /** New location id; `null` removes it. */
+  location?: string | null;
   slot?: {
     /** New start, with offset. */
-    start?: string;
-    /** New end of the window. */
-    end?: string;
+    start: string;
+    /** New end of the window. Without it, the new start plus the current length (or the new type's `minutes`, if you change the type). */
+    end?: string | null;
   };
   customer?: {
     /** New name. */
@@ -277,10 +302,10 @@ export type AppointmentUpdate = {
     /** New email; `null` removes it. */
     email?: string | null;
   };
-  /** New channel order for this appointment. */
+  /** New channel order for this appointment. At least one, without repeats. */
   channels?: Array<Channel>;
-  /** Keys to set, merged with the existing ones. An empty string removes the key. */
-  metadata?: Metadata;
+  /** Keys to set, merged with the existing ones. A value of `null` or an empty string removes the key. At most 20 keys after the merge. */
+  metadata?: Record<string, string | null>;
 };
 
 export type AppointmentList = {
@@ -297,12 +322,13 @@ export type Import = {
   /** Unique id, prefixed `imp_`. */
   id: string;
   object: "import";
-  status: "processing" | "completed" | "failed";
+  /** `processing` until every item is done, then `completed`. The counts and errors are filled in when it completes. */
+  status: "processing" | "completed";
   /** Appointments in the request. */
   total: number;
-  /** Appointments created so far. */
+  /** Appointments created. */
   created: number;
-  /** Appointments updated so far, because their `external_id` already existed. */
+  /** Appointments updated, or left as they were, because their `external_id` already existed. */
   updated: number;
   /** Appointments that failed. */
   failed: number;
@@ -313,10 +339,10 @@ export type Import = {
 export type ImportError = {
   /** Position of the item in `appointments`. */
   index: number;
-  external_id: string;
+  external_id: string | null;
   /** Same codes as the API errors, such as `phone_invalid`. */
   code: string;
-  param?: string;
+  param?: string | null;
   message: string;
 };
 
@@ -378,7 +404,7 @@ export type FirstContact = {
   hours_before: number;
 };
 
-/** What an appointment is. Sets how the time is shown and the instructions added to the message. */
+/** What an appointment is. Sets the name and how the time is shown in messages, and what the customer may answer. */
 export type AppointmentType = {
   /** Your id for the type, such as `delivery`. Sent with each appointment. */
   id: string;
@@ -389,11 +415,11 @@ export type AppointmentType = {
   /** Length of the window or duration of the appointment. */
   minutes: number;
   place: Place;
-  /** What the customer should bring or prepare. Used by the `{instructions}` variable in templates. */
+  /** What the customer should bring or prepare. Stored and returned; not included in messages today. */
   instructions: string | null;
   /** Whether the customer may ask for another date. */
   reschedulable: boolean;
-  /** Whether the customer may cancel. Off for deliveries such as a parcel or a mattress; then a "no" asks for another day (if reschedulable) or goes to your team. */
+  /** Whether the customer may cancel. Off for deliveries such as a parcel or a mattress; messages then do not offer it, and on a call a "no" is taken as a request for another day (if `reschedulable`). */
   cancellable: boolean;
   /** When the first message goes out for this type, or `null` to use your account's setting. */
   first_contact: FirstContact | null;
@@ -401,7 +427,7 @@ export type AppointmentType = {
 };
 
 export type AppointmentTypeCreate = {
-  /** Lowercase letters, numbers, `-` and `_`. Cannot change later. */
+  /** 1 to 40 lowercase letters, numbers, `-` and `_`. Cannot change later. */
   id: string;
   /** Name shown to the customer. */
   name: string;
@@ -409,8 +435,8 @@ export type AppointmentTypeCreate = {
   /** Window length or duration. */
   minutes: number;
   place: Place;
-  /** Optional instructions for the customer. */
-  instructions?: string;
+  /** Optional instructions for the customer. Not included in messages today. */
+  instructions?: string | null;
   reschedulable?: boolean;
   cancellable?: boolean;
   /** Its own first message. Leave it out (or `null`) to use your account's setting. */
@@ -422,7 +448,7 @@ export type AppointmentTypeUpdate = {
   name?: string;
   /** New window length or duration. */
   minutes?: number;
-  /** New instructions. An empty string removes them. */
+  /** New instructions. An empty string clears them. */
   instructions?: string;
   /** Whether the customer may ask for another date. */
   reschedulable?: boolean;
@@ -441,28 +467,28 @@ export type AppointmentTypeList = {
   data: Array<AppointmentType>;
 };
 
-/** A centre, shop or depot. Where location appointments happen, and the phone a call is passed to when the customer wants a person. */
+/** A centre, shop or depot where location appointments happen. */
 export type Location = {
   /** Your id for the location, such as `bilbao`. */
   id: string;
   object: "location";
   /** Name shown to the customer. */
   name: string;
-  /** Address used in the messages for appointments held there. */
+  /** Address shown in the email and on the answer page for appointments held there. */
   address: string;
-  /** Where calls are passed when the customer asks for a person. Without it, Yesly offers a call back and flags the appointment for your team. */
+  /** Phone to pass calls to when the customer asks for a person. Stored and returned; live calls do not transfer today. */
   transfer_phone: Phone | null;
   created: string;
 };
 
 export type LocationCreate = {
-  /** Lowercase letters, numbers, `-` and `_`. Cannot change later. */
+  /** 1 to 40 lowercase letters, numbers, `-` and `_`. Cannot change later. */
   id: string;
   /** Name shown to the customer. */
   name: string;
   /** Full address. */
   address: string;
-  /** Phone for call transfers, E.164. */
+  /** Phone for call transfers, E.164. Not checked; live calls do not transfer today. */
   transfer_phone?: Phone;
 };
 
@@ -471,8 +497,8 @@ export type LocationUpdate = {
   name?: string;
   /** New address. */
   address?: string;
-  /** New transfer phone, E.164. An empty string removes it. */
-  transfer_phone?: string;
+  /** New transfer phone, E.164. An empty string or `null` removes it. */
+  transfer_phone?: string | null;
 };
 
 export type LocationList = {
@@ -488,15 +514,15 @@ export type LocationList = {
  * - `appointment.created`: created by API, import, CSV or in the dashboard.
  * - `appointment.confirmed`: the customer confirmed.
  * - `appointment.rescheduled`: the customer moved it to another slot.
- * - `appointment.reschedule_requested`: the customer asked for another day; set the new slot.
+ * - `appointment.reschedule_requested`: the customer asked for another day without picking a free time; set the new slot.
  * - `appointment.cancelled`: cancelled by the customer or by you.
- * - `appointment.no_reply`: no channel got an answer.
- * - `message.sent`: a WhatsApp message or SMS left Yesly.
+ * - `appointment.no_reply`: no channel got an answer, or the call was transferred.
+ * - `message.sent`: a WhatsApp message, SMS or email left Yesly.
  * - `message.delivered`: the carrier or WhatsApp confirmed delivery.
- * - `message.failed`: it could not be delivered; the next channel runs.
- * - `call.started`: a call started ringing.
- * - `call.completed`: a call ended, with its duration and outcome.
- * - `call.transferred`: the call was passed to the location's phone.
+ * - `message.failed`: it could not be sent or delivered; the next channel runs.
+ * - `call.started`: Yesly placed a call.
+ * - `call.completed`: a call got an answer or ended without one, with its `outcome`.
+ * - `call.transferred`: the call was passed to the location's phone (today only with the test number `+34600000006`).
  * - `balance.low`: the balance went below your alert threshold.
  * - `balance.topped_up`: a top-up was paid.
  */
@@ -508,7 +534,7 @@ export type EventBase = {
   id: string;
   object: "event";
   type: EventType;
-  /** Version used to render `data`, that of the endpoint. */
+  /** Always `2026-10-01`, the only version, whatever the endpoint's `api_version`. */
   api_version: string;
   mode: Mode;
   /** When it happened. */
@@ -522,8 +548,8 @@ export type AppointmentEvent = {
   /** Unique id, prefixed `evt_`. Use it to ignore duplicates. */
   id: string;
   object: "event";
-  type: "appointment.created" | "appointment.confirmed" | "appointment.rescheduled" | "appointment.cancelled" | "appointment.no_reply";
-  /** Version used to render `data`, that of the endpoint. */
+  type: "appointment.created" | "appointment.confirmed" | "appointment.rescheduled" | "appointment.reschedule_requested" | "appointment.cancelled" | "appointment.no_reply";
+  /** Always `2026-10-01`, the only version, whatever the endpoint's `api_version`. */
   api_version: string;
   mode: Mode;
   /** When it happened. */
@@ -540,7 +566,7 @@ export type MessageEvent = {
   id: string;
   object: "event";
   type: "message.sent" | "message.delivered" | "message.failed";
-  /** Version used to render `data`, that of the endpoint. */
+  /** Always `2026-10-01`, the only version, whatever the endpoint's `api_version`. */
   api_version: string;
   mode: Mode;
   /** When it happened. */
@@ -557,7 +583,7 @@ export type CallEvent = {
   id: string;
   object: "event";
   type: "call.started" | "call.completed" | "call.transferred";
-  /** Version used to render `data`, that of the endpoint. */
+  /** Always `2026-10-01`, the only version, whatever the endpoint's `api_version`. */
   api_version: string;
   mode: Mode;
   /** When it happened. */
@@ -574,7 +600,7 @@ export type BalanceEvent = {
   id: string;
   object: "event";
   type: "balance.low" | "balance.topped_up";
-  /** Version used to render `data`, that of the endpoint. */
+  /** Always `2026-10-01`, the only version, whatever the endpoint's `api_version`. */
   api_version: string;
   mode: Mode;
   /** When it happened. */
@@ -597,34 +623,53 @@ export type EventList = {
   data: Array<Event>;
 };
 
-/**
- * A WhatsApp message or SMS, in `message.*` events. The reference does
- * not publish its full shape; like every event object it carries the
- * appointment's `external_id` and `metadata`.
- */
+/** A WhatsApp message, SMS or email, in `message.*` events. It is one of the appointment's attempts, as it stands when the event is recorded. */
 export type Message = {
+  /** Id of the attempt, prefixed `att_`. */
+  id: string;
+  object: "message";
+  /** Id of the appointment, prefixed `apt_`. */
+  appointment: string;
   /** The appointment's `external_id`. */
   external_id: string;
+  channel: "whatsapp" | "sms" | "email";
+  /** The attempt's status, as in the appointment's `attempts`. */
+  status: "queued" | "sent" | "delivered" | "read" | "answered" | "failed";
+  /** When it was handed to the provider, or `null`. */
+  sent_at: string | null;
+  /** Cost in euros. `0` when it was refused when sending (refunded). */
+  cost: number;
+  /** Why it failed. Only on failed messages. */
+  error?: {
+    /** Such as `no_email`, `provider_error`, `twilio_63024` or `ses_MessageRejected`. */
+    code: string;
+    message: string | null;
+  };
   metadata: Metadata;
 };
 
-/** A call to the customer, in `call.*` events. */
+/** A call to the customer, in `call.*` events. It is one of the appointment's attempts. */
 export type Call = {
-  /** Unique id, prefixed `call_`. */
+  /** Id of the attempt, prefixed `att_`. */
   id: string;
   object: "call";
   /** Id of the appointment, prefixed `apt_`. */
   appointment: string;
   /** The appointment's `external_id`. */
   external_id: string;
-  started_at?: string;
+  /** When Yesly placed the call. */
+  started_at: string | null;
+  /** Seconds of talk, once the call has ended. Missing until then. */
   duration_seconds?: number;
-  /** Where the call was passed, on `call.transferred`. */
+  /** Where the call was passed, only on a transferred call. */
   transferred_to?: {
     /** Location id. */
-    location?: string;
-    phone?: Phone;
+    location: string | null;
+    /** The location's `transfer_phone`. */
+    phone: string | null;
   };
+  /** Only on `call.completed`. `answered` when the customer gave an answer on the call, otherwise `no_answer`. */
+  outcome?: "answered" | "no_answer";
   metadata: Metadata;
 };
 
@@ -639,8 +684,9 @@ export type WebhookEndpoint = {
   /** What the endpoint is for. */
   description: string | null;
   enabled_events: EnabledEvents;
+  /** `disabled` by you, or by Yesly after 50 failed deliveries in a row. A disabled endpoint gets no events and its pending retries are dropped. */
   status: "enabled" | "disabled";
-  /** Version used to render the events it receives. */
+  /** Stored as sent (default `2026-10-01`). Events are always rendered with `2026-10-01`. */
   api_version: string;
   created: string;
   /** Signing secret, `whsec_…`. Only returned when the endpoint is created or the secret is rolled. */
@@ -653,12 +699,12 @@ export type WebhookEndpoint = {
 export type EnabledEvents = Array<EventType | "*">;
 
 export type WebhookEndpointCreate = {
-  /** HTTPS URL. Self-signed certificates are refused. */
+  /** HTTPS URL on a public host, without a user name or password (`url_invalid` otherwise). Deliveries to a self-signed certificate fail. */
   url: string;
   enabled_events: EnabledEvents;
   /** Optional note. */
   description?: string;
-  /** Defaults to your account's version. */
+  /** Stored and returned as sent; default `2026-10-01`. It does not change the events. */
   api_version?: string;
 };
 
@@ -669,7 +715,7 @@ export type WebhookEndpointUpdate = {
   enabled_events?: EnabledEvents;
   /** New note. */
   description?: string;
-  /** `true` stops sending events to it until you enable it again. */
+  /** `true` stops sending events to it and drops its pending retries. `false` enables it again and resets its count of failed deliveries. */
   disabled?: boolean;
 };
 
@@ -687,12 +733,14 @@ export type WebhookTest = {
   object: "webhook_test";
   /** Id of the test event sent, prefixed `evt_`. */
   event: string;
-  /** HTTP status your endpoint answered with. */
-  status_code: number;
+  /** HTTP status your endpoint answered with. `null` when there was no answer; see `error`. Redirects are not followed. */
+  status_code: number | null;
   /** Time your endpoint took to answer. */
   duration_ms: number;
-  /** Body your endpoint answered with. */
-  response_body: string;
+  /** Body your endpoint answered with, up to 2,000 characters. `null` when there was no answer. */
+  response_body: string | null;
+  /** Only when there was no answer. */
+  error?: "timeout" | "address_not_allowed" | "connection_failed";
 };
 
 export type DeletedObject = {
@@ -710,18 +758,18 @@ export type Balance = {
   currency: string;
   /** Below this, `balance.low` fires. */
   low_balance_threshold: number;
+  /** Not available yet. `enabled` is `false` and `below` and `amount` are `null`. */
   auto_top_up: {
     enabled: boolean;
-    /** Top up when the balance goes below this. */
-    below: number;
-    /** Amount topped up. */
-    amount: number;
+    below: number | null;
+    amount: number | null;
   };
 };
 
-export type BalanceTransactionType = "usage" | "top_up";
+/** `usage` (a charge), `top_up` (a card top-up) or `adjustment` (money given back, such as a refund for a message refused when sending). */
+export type BalanceTransactionType = "usage" | "top_up" | "adjustment";
 
-/** A charge (`usage`) or a top-up. Charges point to the appointment and its `external_id`. */
+/** A charge (`usage`), a top-up or an adjustment. Charges point to the appointment and its `external_id`; adjustments do not. */
 export type BalanceTransaction = {
   /** Unique id, prefixed `btx_`. */
   id: string;
@@ -729,7 +777,7 @@ export type BalanceTransaction = {
   type: BalanceTransactionType;
   /** Channel charged, on `usage`. */
   channel?: Channel;
-  /** In euros. Negative for charges, positive for top-ups. */
+  /** In euros. Negative for charges, positive for top-ups and adjustments. */
   amount: number;
   /** Units charged, on `usage`. */
   quantity?: number;
@@ -739,7 +787,7 @@ export type BalanceTransaction = {
   appointment?: string;
   /** The appointment's `external_id`, on `usage`. */
   external_id?: string;
-  /** Invoice number, on `top_up`. */
+  /** Id of the Stripe invoice, on `top_up` when Stripe issued one. */
   invoice?: string;
   created: string;
 };
@@ -753,7 +801,7 @@ export type BalanceTransactionList = {
   data: Array<BalanceTransaction>;
 };
 
-/** Outcomes, which channel got the answer, how long customers took, usage and spend. Days follow your account's time zone. */
+/** Outcomes, which channel got the answer, how long customers took, usage and spend. Appointments count on the day of their slot, in your account's time zone. */
 export type AnalyticsSummary = {
   object: "analytics_summary";
   range: "7d" | "30d" | "90d";
@@ -776,17 +824,30 @@ export type AnalyticsSummary = {
     voice?: number;
     email?: number;
   };
-  median_minutes_to_answer: number;
+  /** Median minutes from `first_contact_at` to the answer, or `null` without answers. */
+  median_minutes_to_answer: number | null;
+  /** Messages sent (not failed) and started call minutes. */
   usage: {
     whatsapp_messages?: number;
     sms_messages?: number;
     voice_minutes?: number;
     email_messages?: number;
   };
+  /** What the appointments cost. `0` in test mode. */
   spend: {
     amount: number;
     currency: string;
   };
+  /** One item per day of the range, oldest first. */
+  days: Array<{
+    date: string;
+    /** Appointments whose slot is on this day. */
+    appointments: number;
+    confirmed: number;
+    rescheduled: number;
+    cancelled: number;
+    no_reply: number;
+  }>;
 };
 
 // Parameters of each operation.
@@ -796,10 +857,10 @@ export type AppointmentsListParams = {
   status?: AppointmentStatus;
   /** Only appointments whose slot starts on this day, `YYYY-MM-DD` in your account's time zone. */
   date?: string;
-  /** Slot starts on or after this time. */
-  from?: string;
-  /** Slot starts before this time. */
-  to?: string;
+  /** Slot starts on or after this day or time. A day starts at 00:00 in your account's time zone. */
+  from?: DateOrDateTime;
+  /** Slot starts on or before this day or time. A day ends at 23:59:59 in your account's time zone. */
+  to?: DateOrDateTime;
   /** Only this appointment type. */
   type?: string;
   /** Only this location. */
@@ -858,13 +919,6 @@ export type LocationsCreateParams = LocationCreate;
 
 export type LocationsUpdateParams = LocationUpdate;
 
-export type WebhookEndpointsListParams = {
-  /** Between 1 and 100. Default 20. */
-  limit?: number;
-  /** Cursor: the id of the last item of the previous page. */
-  starting_after?: string;
-};
-
 export type WebhookEndpointsCreateParams = WebhookEndpointCreate;
 
 export type WebhookEndpointsUpdateParams = WebhookEndpointUpdate;
@@ -875,12 +929,12 @@ export type WebhookEndpointsTestParams = {
 };
 
 export type EventsListParams = {
-  /** Only this event type. `appointment.*` matches a whole group. */
+  /** Only this event type, matched exactly. */
   type?: string;
   /** Only events about this appointment. */
   appointment?: string;
-  /** Events created on or after this time. */
-  from?: string;
+  /** Events created on or after this time. A day alone means 00:00 UTC. */
+  from?: DateOrDateTime;
   /** Between 1 and 100. Default 20. */
   limit?: number;
   /** Cursor: the id of the last item of the previous page. */
@@ -888,13 +942,13 @@ export type EventsListParams = {
 };
 
 export type BalanceListTransactionsParams = {
-  /** `usage` or `top_up`. */
+  /** `usage`, `top_up` or `adjustment`. */
   type?: BalanceTransactionType;
   /** Only charges for this appointment. */
   appointment?: string;
-  /** On or after this day or time. */
+  /** On or after this day or time. A day alone means 00:00 UTC. */
   from?: DateOrDateTime;
-  /** Before this day or time. */
+  /** On or before this day or time. A day alone means 23:59:59 UTC. */
   to?: DateOrDateTime;
   /** Between 1 and 100. Default 20. */
   limit?: number;

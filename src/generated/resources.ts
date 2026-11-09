@@ -10,7 +10,7 @@ export class Appointments {
   /**
    * List appointments.
    *
-   * Lists appointments, newest first. A common use is to ask, each afternoon, which of tomorrow's appointments ended with `no_reply` so your team can call them.
+   * Lists appointments. With `status`, `date`, `from`, `to` or `metadata` the list is in slot order, soonest first; otherwise it is newest first, by creation. A `date`, `from` or `to` filter without `status` or `metadata` covers at most 62 days. A common use is to ask, each afternoon, which of tomorrow's appointments ended with `no_reply` so your team can call them.
    *
    * `GET /appointments`
    */
@@ -21,7 +21,7 @@ export class Appointments {
   /**
    * Create an appointment.
    *
-   * Creates an appointment and schedules the first contact. By default Yesly writes the day before at 10:00 and moves through your channels if there is no answer; if the appointment is booked after that moment, contact starts at the next allowed time within your contact hours.
+   * Creates an appointment and schedules the first contact. By default Yesly writes the day before at 10:00 and moves through your channels if there is no answer; if the appointment is booked after that moment, contact starts at the next allowed time within your contact hours. If no contact time is left before the slot starts, `first_contact_at` is `null` and the customer is not contacted.
    *
    * `POST /appointments`
    */
@@ -43,7 +43,7 @@ export class Appointments {
   /**
    * Update an appointment.
    *
-   * Changes an appointment. Send only what changes. `metadata` is merged: keys you send are set, a key sent as an empty string is removed.
+   * Changes an appointment. Send only what changes. `metadata` is merged: keys you send are set, a key sent as `null` or an empty string is removed.
    *
    * `PATCH /appointments/{id}`
    */
@@ -106,7 +106,7 @@ export class Slots {
   /**
    * Publish slots.
    *
-   * Publishes free slots in bulk, up to 500 per request. A slot with the same type, location and start as an existing one replaces it, so you can send your full availability every few hours. Lowering `capacity` below `booked` is refused.
+   * Publishes free slots in bulk, up to 500 per request. A slot with the same type, location and start as an existing one replaces it, so you can send your full availability every few hours; a replaced slot keeps its `booked` count.
    *
    * `POST /slots`
    */
@@ -143,7 +143,7 @@ export class AppointmentTypes {
   /**
    * Create an appointment type.
    *
-   * Adds an appointment type. Message templates pick it up at once through `{type}`, `{time}` and `{instructions}`.
+   * Adds an appointment type. Its name and time format are used in the messages sent from then on.
    *
    * `POST /appointment_types`
    */
@@ -206,12 +206,12 @@ export class WebhookEndpoints {
   /**
    * List endpoints.
    *
-   * Lists the webhook endpoints in the key's mode.
+   * Lists all the webhook endpoints in the key's mode, in one page.
    *
    * `GET /webhook_endpoints`
    */
-  list(params: T.WebhookEndpointsListParams = {}, options?: RequestOptions): PagePromise<T.WebhookEndpoint> {
-    return this.client.list<T.WebhookEndpoint>({ method: "GET", path: `/webhook_endpoints`, query: params }, options);
+  list(options?: RequestOptions): PagePromise<T.WebhookEndpoint> {
+    return this.client.list<T.WebhookEndpoint>({ method: "GET", path: `/webhook_endpoints` }, options);
   }
 
   /**
@@ -250,7 +250,7 @@ export class WebhookEndpoints {
   /**
    * Send a test event.
    *
-   * Sends a sample event, marked `"mode": "test"`, to the endpoint and returns what it answered. Useful to check the URL and your signature check before going live.
+   * Sends a sample event to the endpoint, signed like a real one, and returns what it answered. Useful to check the URL and your signature check before going live. The event has the `mode` of the key that calls this, and `data` is always a sample `appointment` (with only some fields), whatever the `type`. It is not stored, so it does not appear in List events.
    *
    * `POST /webhook_endpoints/{id}/test`
    */
@@ -302,7 +302,7 @@ export class Balance {
   /**
    * Retrieve the balance.
    *
-   * Yesly is prepaid. Each WhatsApp message, SMS and minute of answered call is taken from the balance at the public price; calls nobody picks up are free. Top-ups are made by card in the dashboard and cannot be made through the API.
+   * Yesly is prepaid. Each WhatsApp message, SMS, email and started minute of a call that was picked up is taken from the balance at the public price; calls nobody picks up are free. A message that could not be sent is refunded with an `adjustment`. When a customer asks for another day on a call, the SMS with the link to pick a day is charged as an SMS. Top-ups are made by card in the dashboard and cannot be made through the API.
    *
    * `GET /balance`
    */
@@ -313,7 +313,7 @@ export class Balance {
   /**
    * List balance transactions.
    *
-   * Every charge and top-up, newest first. Charges point to the appointment and its `external_id`, so you can pass the cost on to an order, route or customer.
+   * Every charge, top-up and adjustment, newest first. Charges point to the appointment and its `external_id`, so you can pass the cost on to an order, route or customer. Refunds of failed messages (`adjustment`) do not point to the appointment.
    *
    * `GET /balance/transactions`
    */
@@ -328,7 +328,7 @@ export class Analytics {
   /**
    * Summary.
    *
-   * The figures behind the dashboard's Analytics page, for your own reports: outcomes, which channel got the answer, how long customers took, usage and spend. Days follow your account's time zone.
+   * The figures behind the dashboard's Analytics page, for your own reports: outcomes, which channel got the answer, how long customers took, usage and spend, in total and day by day. Appointments count on the day of their slot, in your account's time zone.
    *
    * `GET /analytics/summary`
    */

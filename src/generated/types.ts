@@ -80,7 +80,7 @@ export type Error = {
  */
 export type AppointmentStatus = "scheduled" | "in_progress" | "confirmed" | "rescheduled" | "reschedule_requested" | "cancelled" | "no_reply";
 
-/** `start` and `end` of the appointment. For exact-time types, `end` is `start` plus the type's duration. */
+/** `start` and `end` of the appointment. For exact-time types without an end, `end` is `start`. */
 export type AppointmentSlot = {
   start: string;
   end: string;
@@ -187,15 +187,31 @@ export type Attempt = {
   status: "queued" | "sent" | "delivered" | "read" | "answered" | "no_answer" | "failed" | "transferred";
   /** When it was handed to the provider. `null` while `queued` or when it failed before. */
   sent_at: string | null;
-  /** Cost of this attempt, in euros. `0` for a message refused when sending (refunded). On a call, includes the SMS with the link to pick a day, if one was sent. */
+  /** Cost of this attempt, in euros. `0` for a message refused when sending (refunded). On a call, includes the WhatsApp or SMS with the link to pick a day, if one was sent; a call that reached a voicemail is free. */
   cost: number;
   /**
-   * Calls only: what the call said and what it heard, in order. A
+   * Calls only, and only when you get one appointment (lists leave
+   * it out): what the call said and what it heard, in order. A
    * customer turn has the recognised speech in `text` (empty for a
    * silence) or the key pressed in `key`. Kept with the appointment and
    * deleted with it.
    */
   transcript?: Array<TranscriptLine>;
+  /** Calls only. `true` when the call's audio was recorded; get it with `GET /appointments/{id}/attempts/{attempt}/recording`. */
+  has_recording?: boolean;
+  /** Calls only. `true` when Yesly's agent read the answer back (the date to confirm, the new slot or the cancellation) and the customer said yes again before it was recorded. */
+  answer_verified?: boolean;
+};
+
+/** A short-lived link to a call recording. */
+export type Recording = {
+  object: "recording";
+  /** Id of the call attempt. */
+  attempt: string;
+  content_type: "audio/wav";
+  /** Download or play link. Works until `expires_at`. */
+  url: string;
+  expires_at: string;
 };
 
 /** One turn of a call. */
@@ -241,8 +257,9 @@ export type Appointment = {
    * What this appointment has cost so far, in euros. WhatsApp 0.08 per
    * message, SMS 0.15 per message, email 0.01 per message, voice 0.30
    * per started minute of a call that was picked up; unanswered calls
-   * are free. An SMS with the link to pick a day after a call adds
-   * 0.15. Messages refused when sending are refunded. In test mode it
+   * are free, and so are voicemails. The link to pick a day after a
+   * call adds a WhatsApp (0.08) or, when WhatsApp cannot be used, an
+   * SMS (0.15). Messages refused when sending are refunded. In test mode it
    * shows the message prices, but nothing is charged.
    */
   cost: number;
@@ -265,7 +282,7 @@ export type AppointmentCreate = {
   slot: {
     /** Start of the appointment or of the time window, with offset. */
     start: string;
-    /** End of the window, after `start`. Without it, `start` plus the type's `minutes` (60 if the account has no types). */
+    /** End of the window, after `start`. Required unless the type is `exact` (then it may be left out, and `end` is `start`). */
     end?: string | null;
   };
   customer: {
@@ -292,7 +309,7 @@ export type AppointmentUpdate = {
   slot?: {
     /** New start, with offset. */
     start: string;
-    /** New end of the window. Without it, the new start plus the current length (or the new type's `minutes`, if you change the type). */
+    /** New end of the window. Without it, a window keeps its current length; an exact time needs none. */
     end?: string | null;
   };
   customer?: {
@@ -315,6 +332,23 @@ export type AppointmentList = {
   /** Whether there are more items after this page. */
   has_more: boolean;
   data: Array<Appointment>;
+};
+
+/** How many appointments of each status match the filters. */
+export type AppointmentCounts = {
+  object: "appointment_counts";
+  /** One entry per status, `0` when there are none. */
+  counts: {
+    scheduled: number;
+    in_progress: number;
+    confirmed: number;
+    rescheduled: number;
+    reschedule_requested: number;
+    cancelled: number;
+    no_reply: number;
+  };
+  /** The sum of `counts`. */
+  total: number;
 };
 
 /** A bulk import of appointments, processed in the background. */
@@ -412,17 +446,15 @@ export type AppointmentType = {
   /** What the customer reads in the message. */
   name: string;
   time_format: TimeFormat;
-  /** Length of the window or duration of the appointment. */
-  minutes: number;
   place: Place;
   /** What the customer should bring or prepare. Stored and returned; not included in messages today. */
   instructions: string | null;
   /** Whether the customer may ask for another date. */
   reschedulable: boolean;
+  reschedule: RescheduleWindow;
   /** Whether the customer may cancel. Off for deliveries such as a parcel or a mattress; messages then do not offer it, and on a call a "no" is taken as a request for another day (if `reschedulable`). */
   cancellable: boolean;
-  /** When the first message goes out for this type, or `null` to use your account's setting. */
-  first_contact: FirstContact | null;
+  first_contact: FirstContact;
   created: string;
 };
 
@@ -432,30 +464,36 @@ export type AppointmentTypeCreate = {
   /** Name shown to the customer. */
   name: string;
   time_format: TimeFormat;
-  /** Window length or duration. */
-  minutes: number;
   place: Place;
   /** Optional instructions for the customer. Not included in messages today. */
   instructions?: string | null;
   reschedulable?: boolean;
+  /** Where the customer may move it to. Default: 24 hours to 14 days from when they ask. */
+  reschedule?: RescheduleWindow;
   cancellable?: boolean;
-  /** Its own first message. Leave it out (or `null`) to use your account's setting. */
-  first_contact?: FirstContact | null;
+  /** When the first message goes out. Default: the day before at 10:00. */
+  first_contact?: FirstContact;
 };
 
 export type AppointmentTypeUpdate = {
   /** New name. */
   name?: string;
-  /** New window length or duration. */
-  minutes?: number;
   /** New instructions. An empty string clears them. */
   instructions?: string;
   /** Whether the customer may ask for another date. */
   reschedulable?: boolean;
+  reschedule?: RescheduleWindow;
   /** Whether the customer may cancel. */
   cancellable?: boolean;
-  /** Its own first message; `null` goes back to your account's setting. */
-  first_contact?: FirstContact | null;
+  first_contact?: FirstContact;
+};
+
+/** Where a customer may move the appointment to, counted from when they ask. Applies when `reschedulable` is true. */
+export type RescheduleWindow = {
+  /** The new time is at least this many hours later. */
+  min_notice_hours: number;
+  /** The new time is at most this many days later. */
+  window_days: number;
 };
 
 export type AppointmentTypeList = {
@@ -766,7 +804,7 @@ export type Balance = {
   };
 };
 
-/** `usage` (a charge), `top_up` (a card top-up) or `adjustment` (money given back, such as a refund for a message refused when sending). */
+/** `usage` (a charge), `top_up` (a card top-up) or `adjustment` (money given back, such as a refund for a message refused when sending, or taken back, negative, when a card top-up is refunded or disputed). */
 export type BalanceTransactionType = "usage" | "top_up" | "adjustment";
 
 /** A charge (`usage`), a top-up or an adjustment. Charges point to the appointment and its `external_id`; adjustments do not. */
@@ -826,6 +864,15 @@ export type AnalyticsSummary = {
   };
   /** Median minutes from `first_contact_at` to the answer, or `null` without answers. */
   median_minutes_to_answer: number | null;
+  /** Calls answered by Yesly's conversational agent in the range. */
+  agent_calls?: {
+    /** Calls the agent took. */
+    calls?: number;
+    /** Of those, calls that ended with the customer's answer (confirmed, new day, another day asked or cancelled). */
+    resolved?: number;
+    /** Of those, calls where the agent read the answer back and the customer said yes again (`answer_verified` on the attempt). */
+    verified?: number;
+  };
   /** Messages sent (not failed) and started call minutes. */
   usage: {
     whatsapp_messages?: number;
@@ -876,6 +923,23 @@ export type AppointmentsListParams = {
 };
 
 export type AppointmentsCreateParams = AppointmentCreate;
+
+export type AppointmentsCountParams = {
+  /** Only appointments whose slot starts on this day, `YYYY-MM-DD` in your account's time zone. */
+  date?: string;
+  /** Slot starts on or after this day or time. A day starts at 00:00 in your account's time zone. */
+  from?: DateOrDateTime;
+  /** Slot starts on or before this day or time. A day ends at 23:59:59 in your account's time zone. */
+  to?: DateOrDateTime;
+  /** Only this appointment type. */
+  type?: string;
+  /** Only this location. */
+  location?: string;
+  /** The appointment with this `external_id`. */
+  external_id?: string;
+  /** Only appointments whose metadata has this value, such as `metadata[route_id]=BIO-07`. */
+  metadata?: Record<string, string>;
+};
 
 export type AppointmentsUpdateParams = AppointmentUpdate;
 

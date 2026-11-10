@@ -30,6 +30,17 @@ export class Appointments {
   }
 
   /**
+   * Count appointments by status.
+   *
+   * How many appointments List appointments would return for each status, with the same filters (all of them but `status`, `limit` and `starting_after`). Without `date`, `from` or `to` it counts every appointment the account still keeps. Counts with whole days (`date`, or `from` and `to` as dates) or no dates, by type and location, come from counters kept as appointments change, a few seconds behind.
+   *
+   * `GET /appointments/counts`
+   */
+  count(params: T.AppointmentsCountParams = {}, options?: RequestOptions): Promise<T.AppointmentCounts> {
+    return this.client.request<T.AppointmentCounts>({ method: "GET", path: `/appointments/counts`, query: params }, options);
+  }
+
+  /**
    * Retrieve an appointment.
    *
    * Fetches an appointment with its attempts and answer. To find one by your own id, list with `external_id`.
@@ -60,6 +71,17 @@ export class Appointments {
    */
   cancel(id: string, params: T.AppointmentsCancelParams = {}, options?: RequestOptions): Promise<T.Appointment> {
     return this.client.request<T.Appointment>({ method: "POST", path: `/appointments/${encodeURIComponent(id)}/cancel`, body: params, idempotent: true }, options);
+  }
+
+  /**
+   * Get a call recording.
+   *
+   * A link to the audio of a conversational call (attempts with `has_recording` `true`): a WAV file, customer on the left channel and Yesly's agent on the right. The link works for 15 minutes; ask again for a new one. Recordings are kept as long as the account's retention allows and stored in the EU. Every link is logged (who and when, a member or an API key by name); owners and admins see the log in the dashboard. Needs a key with full access: a read-only key gets `403` `api_key_scope`.
+   *
+   * `GET /appointments/{id}/attempts/{attempt}/recording`
+   */
+  recording(id: string, attempt: string, options?: RequestOptions): Promise<T.Recording> {
+    return this.client.request<T.Recording>({ method: "GET", path: `/appointments/${encodeURIComponent(id)}/attempts/${encodeURIComponent(attempt)}/recording` }, options);
   }
 
   /**
@@ -250,7 +272,7 @@ export class WebhookEndpoints {
   /**
    * Send a test event.
    *
-   * Sends a sample event to the endpoint, signed like a real one, and returns what it answered. Useful to check the URL and your signature check before going live. The event has the `mode` of the key that calls this, and `data` is always a sample `appointment` (with only some fields), whatever the `type`. It is not stored, so it does not appear in List events.
+   * Sends a sample event to the endpoint, signed like a real one, and returns what it answered. Useful to check the URL and your signature check before going live. The event has the `mode` of the key that calls this, and `data` is always a sample `appointment` (with only some fields), whatever the `type`. It is not stored, so it does not appear in List events. Needs a key with full access: a read-only key gets `403` `api_key_read_only`.
    *
    * `POST /webhook_endpoints/{id}/test`
    */
@@ -302,7 +324,7 @@ export class Balance {
   /**
    * Retrieve the balance.
    *
-   * Yesly is prepaid. Each WhatsApp message, SMS, email and started minute of a call that was picked up is taken from the balance at the public price; calls nobody picks up are free. A message that could not be sent is refunded with an `adjustment`. When a customer asks for another day on a call, the SMS with the link to pick a day is charged as an SMS. Top-ups are made by card in the dashboard and cannot be made through the API.
+   * Yesly is prepaid. Each WhatsApp message, SMS, email and started minute of a call that was picked up is taken from the balance at the public price; calls nobody picks up are free. A message that could not be sent is refunded with an `adjustment`. When a customer asks for another day on a call, the link to pick a day goes by WhatsApp (or by SMS when WhatsApp cannot be used) and is charged as a message of that channel. Top-ups are made by card in the dashboard and cannot be made through the API.
    *
    * `GET /balance`
    */

@@ -9,17 +9,6 @@ export const BASE_URL = "https://api.yesly.dev/v1";
 /** Every webhook event type. */
 export const EVENT_TYPES = ["appointment.created","appointment.confirmed","appointment.rescheduled","appointment.reschedule_requested","appointment.cancelled","appointment.no_reply","message.sent","message.delivered","message.failed","call.started","call.completed","call.transferred","balance.low","balance.topped_up"] as const;
 
-/** A use case Yesly contacts customers for. Today only `appointments`; more values will be added. */
-export type UseCase = "appointments";
-
-/** The object an event or charge is about. */
-export type Subject = {
-  /** Its type, as in its own `object` field. Today always `appointment`. */
-  object: string;
-  /** Its id. */
-  id: string;
-};
-
 /** `live` or `test`, from the API key. */
 export type Mode = "live" | "test";
 
@@ -583,10 +572,6 @@ export type EventBase = {
   id: string;
   object: "event";
   type: EventType;
-  /** The use case the event belongs to; `null` for the account's own `balance.*` events. */
-  use_case: UseCase | null;
-  /** What the event is about (the appointment, also for `message.*` and `call.*`); `null` for `balance.*` events. */
-  subject: Subject | null;
   /** Always `2026-10-01`, the only version, whatever the endpoint's `api_version`. */
   api_version: string;
   mode: Mode;
@@ -602,10 +587,6 @@ export type AppointmentEvent = {
   id: string;
   object: "event";
   type: "appointment.created" | "appointment.confirmed" | "appointment.rescheduled" | "appointment.reschedule_requested" | "appointment.cancelled" | "appointment.no_reply";
-  /** The use case the event belongs to; `null` for the account's own `balance.*` events. */
-  use_case: UseCase | null;
-  /** What the event is about (the appointment, also for `message.*` and `call.*`); `null` for `balance.*` events. */
-  subject: Subject | null;
   /** Always `2026-10-01`, the only version, whatever the endpoint's `api_version`. */
   api_version: string;
   mode: Mode;
@@ -623,10 +604,6 @@ export type MessageEvent = {
   id: string;
   object: "event";
   type: "message.sent" | "message.delivered" | "message.failed";
-  /** The use case the event belongs to; `null` for the account's own `balance.*` events. */
-  use_case: UseCase | null;
-  /** What the event is about (the appointment, also for `message.*` and `call.*`); `null` for `balance.*` events. */
-  subject: Subject | null;
   /** Always `2026-10-01`, the only version, whatever the endpoint's `api_version`. */
   api_version: string;
   mode: Mode;
@@ -644,10 +621,6 @@ export type CallEvent = {
   id: string;
   object: "event";
   type: "call.started" | "call.completed" | "call.transferred";
-  /** The use case the event belongs to; `null` for the account's own `balance.*` events. */
-  use_case: UseCase | null;
-  /** What the event is about (the appointment, also for `message.*` and `call.*`); `null` for `balance.*` events. */
-  subject: Subject | null;
   /** Always `2026-10-01`, the only version, whatever the endpoint's `api_version`. */
   api_version: string;
   mode: Mode;
@@ -665,10 +638,6 @@ export type BalanceEvent = {
   id: string;
   object: "event";
   type: "balance.low" | "balance.topped_up";
-  /** The use case the event belongs to; `null` for the account's own `balance.*` events. */
-  use_case: UseCase | null;
-  /** What the event is about (the appointment, also for `message.*` and `call.*`); `null` for `balance.*` events. */
-  subject: Subject | null;
   /** Always `2026-10-01`, the only version, whatever the endpoint's `api_version`. */
   api_version: string;
   mode: Mode;
@@ -764,8 +733,8 @@ export type WebhookEndpoint = {
   previous_secret_expires_at?: string;
 };
 
-/** Event types sent to the endpoint. `["*"]` for all; a family such as `appointment.*` for every event of one object, including types added later. */
-export type EnabledEvents = Array<EventType | "*" | "appointment.*" | "message.*" | "call.*" | "balance.*">;
+/** Event types sent to the endpoint. `["*"]` for all. */
+export type EnabledEvents = Array<EventType | "*">;
 
 export type WebhookEndpointCreate = {
   /** HTTPS URL on a public host, without a user name or password (`url_invalid` otherwise). Deliveries to a self-signed certificate fail. */
@@ -838,7 +807,7 @@ export type Balance = {
 /** `usage` (a charge), `top_up` (a card top-up) or `adjustment` (money given back, such as a refund for a message refused when sending, or taken back, negative, when a card top-up is refunded or disputed). */
 export type BalanceTransactionType = "usage" | "top_up" | "adjustment";
 
-/** A charge (`usage`), a top-up or an adjustment. Charges point to their use case, the appointment and its `external_id`; adjustments do not. */
+/** A charge (`usage`), a top-up or an adjustment. Charges point to the appointment and its `external_id`; adjustments do not. */
 export type BalanceTransaction = {
   /** Unique id, prefixed `btx_`. */
   id: string;
@@ -848,10 +817,6 @@ export type BalanceTransaction = {
   channel?: Channel;
   /** In euros. Negative for charges, positive for top-ups and adjustments. */
   amount: number;
-  /** The use case charged, on `usage`; `null` on top-ups and adjustments, which belong to the account. */
-  use_case: UseCase | null;
-  /** The object charged, on `usage` (the appointment); `null` otherwise. */
-  subject: Subject | null;
   /** Units charged, on `usage`. */
   quantity?: number;
   /** `message` for WhatsApp, SMS and email, `minute` for voice. */
@@ -877,7 +842,6 @@ export type BalanceTransactionList = {
 /** Outcomes, which channel got the answer, how long customers took, usage and spend. Appointments count on the day of their slot, in your account's time zone. */
 export type AnalyticsSummary = {
   object: "analytics_summary";
-  use_case: UseCase;
   range: "7d" | "30d" | "90d";
   from: string;
   to: string;
@@ -1031,11 +995,7 @@ export type WebhookEndpointsTestParams = {
 export type EventsListParams = {
   /** Only this event type, matched exactly. */
   type?: string;
-  /** Only events of this use case. Leaves out the account's own `balance.*` events. */
-  use_case?: UseCase;
-  /** Only events about this object, by its id (today an appointment, `apt_…`). */
-  subject?: string;
-  /** Only events about this appointment. Same as `subject` with an appointment id. */
+  /** Only events about this appointment. */
   appointment?: string;
   /** Events created on or after this time. A day alone means 00:00 UTC. */
   from?: DateOrDateTime;
@@ -1048,11 +1008,7 @@ export type EventsListParams = {
 export type BalanceListTransactionsParams = {
   /** `usage`, `top_up` or `adjustment`. */
   type?: BalanceTransactionType;
-  /** Only charges of this use case. Top-ups and adjustments belong to the account and are left out. */
-  use_case?: UseCase;
-  /** Only charges for this object, by its id (today an appointment, `apt_…`). */
-  subject?: string;
-  /** Only charges for this appointment. Same as `subject` with an appointment id. */
+  /** Only charges for this appointment. */
   appointment?: string;
   /** On or after this day or time. A day alone means 00:00 UTC. */
   from?: DateOrDateTime;
@@ -1065,8 +1021,6 @@ export type BalanceListTransactionsParams = {
 };
 
 export type AnalyticsRetrieveSummaryParams = {
-  /** The use case whose figures you want. Each use case has its own; today only `appointments`. */
-  use_case?: UseCase;
   /** Days covered, ending today. */
   range?: "7d" | "30d" | "90d";
   /** Only this appointment type. */

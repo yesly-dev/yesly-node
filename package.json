@@ -1,6 +1,6 @@
 {
   "name": "@yesly/node",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Official Node.js library for the Yesly API",
   "license": "MIT",
   "homepage": "https://yesly.dev",
@@ -40,7 +40,8 @@
   },
   "keywords": [
     "yesly",
-    "appointments",
+    "agents",
+    "conversations",
     "whatsapp",
     "sms",
     "api"

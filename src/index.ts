@@ -4,7 +4,7 @@ import { webhooks } from "./webhooks.js";
 
 type Resources = ReturnType<typeof resourcesOf>;
 
-// The resources (`appointments`, `slots`, …) are generated from the OpenAPI
+// The resources (`conversations`, `contacts`, …) are generated from the OpenAPI
 // specification and attached in the constructor.
 export interface Yesly extends Resources {}
 

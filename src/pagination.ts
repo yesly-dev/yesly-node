@@ -1,5 +1,5 @@
 /** One page of a list, as the API returns it, plus helpers to walk the rest. */
-export class Page<T extends { id: string }> implements AsyncIterable<T> {
+export class Page<T extends object> implements AsyncIterable<T> {
   readonly object = "list" as const;
   readonly url: string;
   readonly has_more: boolean;
@@ -20,8 +20,9 @@ export class Page<T extends { id: string }> implements AsyncIterable<T> {
 
   /** The page after this one. Check `hasNextPage()` first. */
   nextPage(): Promise<Page<T>> {
-    const last = this.data.at(-1);
-    if (!this.has_more || !last) throw new Error("There is no next page.");
+    // Lists that come whole, in one page (a conversation's turns), have items without an id.
+    const last = this.data.at(-1) as { id?: unknown } | undefined;
+    if (!this.has_more || typeof last?.id !== "string") throw new Error("There is no next page.");
     return this.fetchAfter(last.id);
   }
 
@@ -44,7 +45,7 @@ export class Page<T extends { id: string }> implements AsyncIterable<T> {
  * What list methods return: await it for the first page, or iterate it with
  * `for await` to get every item across pages.
  */
-export class PagePromise<T extends { id: string }> implements PromiseLike<Page<T>>, AsyncIterable<T> {
+export class PagePromise<T extends object> implements PromiseLike<Page<T>>, AsyncIterable<T> {
   private readonly first: Promise<Page<T>>;
 
   constructor(load: () => Promise<Page<T>>) {

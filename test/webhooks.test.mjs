@@ -4,13 +4,14 @@ import { test } from "node:test";
 import Yesly, { SignatureVerificationError, constructEvent, generateTestHeader } from "../dist/index.js";
 
 const secret = "whsec_test";
-const body = JSON.stringify({ id: "evt_1", object: "event", type: "appointment.confirmed", data: { appointment: { id: "apt_1" } } });
+const body = JSON.stringify({ id: "evt_1", object: "event", type: "conversation.ended", data: { conversation: { id: "cnv_7Qp4Ns2Xk9Lm3D", outcome: { code: "confirmed", data: {} } } } });
 const now = 1794474252;
 const sign = (s, t = now, payload = body) => createHmac("sha256", s).update(`${t}.${payload}`).digest("hex");
 
 test("accepts a valid signature and returns the event", () => {
   const ev = constructEvent(body, `t=${now},v1=${sign(secret)}`, secret, { now });
-  assert.equal(ev.type, "appointment.confirmed");
+  assert.equal(ev.type, "conversation.ended");
+  assert.equal(ev.data.conversation.outcome.code, "confirmed");
   assert.equal(Yesly.webhooks.constructEvent(Buffer.from(body), `t=${now},v1=${sign(secret)}`, secret, { now }).id, "evt_1");
 });
 

@@ -107,7 +107,7 @@ export class Client {
     }
   }
 
-  list<T extends { id: string }>(spec: RequestSpec, options: RequestOptions = {}): PagePromise<T> {
+  list<T extends object>(spec: RequestSpec, options: RequestOptions = {}): PagePromise<T> {
     const load = (startingAfter?: string): Promise<Page<T>> =>
       this.request<{ url: string; has_more: boolean; data: T[] }>(
         startingAfter ? { ...spec, query: { ...spec.query, starting_after: startingAfter } } : spec,

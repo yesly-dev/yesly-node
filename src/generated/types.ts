@@ -121,6 +121,8 @@ export type Agent = {
   channels: Array<Channel>;
   /** The voice of its calls, from the dashboard's catalog, or `null` for its default. */
   voice: string | null;
+  /** The email profile its emails go out through: one of the company's own SMTP servers, set up in the dashboard (Settings → Email). `null`: Yesly's sender, with the company's name. */
+  email_profile: string | null;
   /** The models it runs on, as `provider:model`. Set by Yesly. */
   models: {
     /** Speech to text, or `null` with a speech-to-speech model. */
@@ -155,6 +157,8 @@ export type Agent = {
 export type AgentUpdate = {
   /** A voice of the catalog, or `null` for the agent's default. */
   voice?: string | null;
+  /** One of the company's email profiles, or `null` for Yesly's sender. */
+  email_profile?: string | null;
   /** Only the limits sent change. */
   limits?: {
     max_call_minutes?: number;
@@ -352,6 +356,8 @@ export type Conversation = {
   transcript: "available" | "expired" | "deleted";
   /** `available`, `expired` (past your retention) or `none` (no call was recorded). */
   recording: "available" | "expired" | "none";
+  /** Id of the campaign that started it, prefixed `cmp_`. `null` when it did not come from a campaign. */
+  campaign: string | null;
   created: string;
 };
 
@@ -375,6 +381,149 @@ export type ConversationList = {
   /** Whether there are more items after this page. */
   has_more: boolean;
   data: Array<Conversation>;
+};
+
+/**
+ * - `scheduled`: `start_at` is in the future.
+ * - `running`: starting conversations, or waiting for the ones started to finish.
+ * - `waiting`: recipients are left but it is outside the agent's contact hours (live mode).
+ * - `paused`: you paused it; nothing new starts. Conversations already started go on.
+ * - `cancelled`: you cancelled it; recipients not started are `skipped`. Conversations already started go on.
+ * - `completed`: every recipient was started or failed, and every conversation finished.
+ */
+export type CampaignStatus = "scheduled" | "running" | "waiting" | "paused" | "cancelled" | "completed";
+
+/** One agent contacting many people at a steady pace. Each recipient is started as an ordinary outbound conversation. */
+export type Campaign = {
+  /** Unique id, prefixed `cmp_`. */
+  id: string;
+  object: "campaign";
+  mode: Mode;
+  name: string;
+  /** Id of the agent. */
+  agent: string;
+  /** The order the channels are tried in, for every conversation. */
+  channels: Array<Channel>;
+  /** Not before this time. */
+  start_at: string;
+  /** Conversations started per minute. */
+  rate: number;
+  status: CampaignStatus;
+  /** How many rows are in each state. */
+  recipients: {
+    total: number;
+    /** Not started yet. */
+    pending: number;
+    /** Started: a conversation exists. */
+    launched: number;
+    /** Could not start, for example because the contact was erased or the number is not allowed. Each row has an `error`. */
+    failed: number;
+    /** Not started because the campaign was cancelled. */
+    skipped: number;
+  };
+  /** The conversations the campaign started, counted by status, with what they achieved so far. */
+  conversations: {
+    scheduled: number;
+    in_progress: number;
+    ended: number;
+    no_reply: number;
+    cancelled: number;
+    failed: number;
+    /** How many contacts answered or wrote back. */
+    engaged: number;
+    /** Conversations per outcome code of the agent. Codes nobody reached are missing. */
+    outcomes: Record<string, number>;
+    /** What the conversations cost so far, in euro cents. `0` in test mode. */
+    cost_cents: number;
+  };
+  created: string;
+  /** When the campaign was cancelled or completed. `null` until then. */
+  ended_at: string | null;
+};
+
+/** One person to contact: an existing contact (`contact`), or the person's details with at least a phone, an email or an `external_id`. */
+export type CampaignRecipientInput = {
+  /** Id of an existing contact, prefixed `ctc_`. Do not combine with the person's details. */
+  contact?: string;
+  /** Your own id for the customer. */
+  external_id?: string;
+  name?: string;
+  language?: string;
+  phone?: Phone;
+  email?: Email;
+  /** Your data for the agent for this person, checked against its `context_schema`. */
+  context?: Record<string, unknown>;
+};
+
+export type CampaignCreate = {
+  name: string;
+  /** Id of the agent, prefixed `agt_`. */
+  agent: string;
+  /** The order to try for every recipient, with the same rules as Create a conversation. */
+  channels: Array<Channel>;
+  /** Not before this time, and always inside contact hours in live mode. Default now. At most 90 days ahead. */
+  start_at?: string;
+  /** Conversations started per minute. */
+  rate?: number;
+  /** Who to contact, in order. */
+  recipients: Array<CampaignRecipientInput>;
+};
+
+export type CampaignList = {
+  object: "list";
+  /** Path of the list, such as `/v1/conversations`. */
+  url: string;
+  /** Whether there are more items after this page. */
+  has_more: boolean;
+  data: Array<Campaign>;
+};
+
+/**
+ * - `pending`: not started yet.
+ * - `launched`: its conversation was started.
+ * - `failed`: it could not start; see `error`.
+ * - `skipped`: the campaign was cancelled before it started.
+ */
+export type CampaignRecipientStatus = "pending" | "launched" | "failed" | "skipped";
+
+/** One row of a campaign. Once it has started it shows the contact's current details, which are `null` after the contact is erased; before, what you sent (or the contact's details when sent as a contact id). */
+export type CampaignRecipient = {
+  object: "campaign_recipient";
+  /** Position in the campaign, from 1. */
+  row: number;
+  status: CampaignRecipientStatus;
+  name: string | null;
+  phone: string | null;
+  email: string | null;
+  external_id: string | null;
+  /** Id of the contact, prefixed `ctc_`. `null` until the row starts, and after the contact is erased. */
+  contact: string | null;
+  /** Why the row failed. `null` otherwise. */
+  error: {
+    code: string;
+    message: string;
+  } | null;
+  /** The conversation the row started. `null` until then. */
+  conversation: {
+    /** Id of the conversation, prefixed `cnv_`. */
+    id: string;
+    status: ConversationStatus;
+    /** The channel in use, or the last one used. */
+    channel: Channel | null;
+    /** The outcome code the agent ended with. `null` until then. */
+    outcome: {
+      code: string;
+    } | null;
+  } | null;
+};
+
+export type CampaignRecipientList = {
+  object: "list";
+  /** Path of the list, such as `/v1/conversations`. */
+  url: string;
+  /** Whether there are more items after this page. */
+  has_more: boolean;
+  data: Array<CampaignRecipient>;
 };
 
 /** One thing the contact or the agent said or wrote. */
@@ -826,6 +975,8 @@ export type BalanceTransaction = {
   id: string;
   object: "balance_transaction";
   type: BalanceTransactionType;
+  /** The account that spent it; `null` for the organization's top-ups. */
+  account: string | null;
   /** Channel charged, on `usage`. */
   channel?: Channel;
   /** In euros. Negative for charges, positive for top-ups and adjustments. */
@@ -890,6 +1041,23 @@ export type AnalyticsSummary = {
   engaged: number;
   /** Conversations handed to a person. */
   transferred: number;
+  /** Calls either way (one conversation may make several), by the day of their conversation. */
+  calls?: {
+    /** Calls dialled or received. */
+    placed: number;
+    /** Calls a person picked up (not a voicemail). */
+    answered: number;
+    /** Calls the agent took and spoke on. */
+    taken: number;
+    /** Calls nobody picked up, or that were busy or rejected. */
+    no_answer: number;
+    /** Calls a voicemail picked up. */
+    voicemail: number;
+    /** Calls that could not be placed or broke. */
+    failed: number;
+    /** Average milliseconds from the pick-up to the agent speaking. `null` without answered calls. */
+    first_words_ms: number | null;
+  };
   /** Conversations by the last channel used. */
   by_channel: {
     call: number;
@@ -987,6 +1155,8 @@ export type ConversationsListParams = {
   from?: DateOrDateTime;
   /** Created on or before this day or time. A day ends at 23:59:59 in your account's time zone. */
   to?: DateOrDateTime;
+  /** `desc` (default) lists the newest first; `asc` the oldest. `starting_after` continues in the same order. */
+  order?: "desc" | "asc";
   /** Between 1 and 100. Default 20. */
   limit?: number;
   /** Cursor: the id of the last item of the previous page. */
@@ -998,6 +1168,26 @@ export type ConversationsCreateParams = ConversationCreate;
 export type ConversationsRecordingParams = {
   /** The call, prefixed `msg_`. */
   message?: string;
+};
+
+export type CampaignsListParams = {
+  /** Only in this status. */
+  status?: CampaignStatus;
+  /** Between 1 and 100. Default 20. */
+  limit?: number;
+  /** Cursor: the id of the last item of the previous page. */
+  starting_after?: string;
+};
+
+export type CampaignsCreateParams = CampaignCreate;
+
+export type CampaignsListRecipientsParams = {
+  /** Only rows in this status. */
+  status?: CampaignRecipientStatus;
+  /** Between 1 and 100. Default 50. */
+  limit?: number;
+  /** Cursor: the row number of the last item of the previous page. */
+  starting_after?: number;
 };
 
 export type MessagesListParams = {

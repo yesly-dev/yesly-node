@@ -30,7 +30,7 @@ export class Agents {
   /**
    * Update an agent's settings.
    *
-   * Changes the settings you own: voice, limits, contact hours, recording, the disclosure sentence and the transfer targets. The agent's code, models, outcomes and context are Yesly's: ask for a new version. Accounts with EU data residency cannot choose a voice that is processed outside the EU (`voice_not_in_eu`).
+   * Changes the settings you own: voice, email profile, limits, contact hours, recording, the disclosure sentence and the transfer targets. The agent's code, models, outcomes and context are Yesly's: ask for a new version. Accounts with EU data residency cannot choose a voice that is processed outside the EU (`voice_not_in_eu`).
    *
    * `PATCH /agents/{id}`
    */
@@ -170,7 +170,7 @@ export class Conversations {
   /**
    * List conversations.
    *
-   * Newest first, by creation.
+   * Newest first by creation, or oldest first with `order=asc`.
    *
    * `GET /conversations`
    */
@@ -240,6 +240,85 @@ export class Conversations {
    */
   recording(id: string, params: T.ConversationsRecordingParams = {}, options?: RequestOptions): Promise<T.Recording> {
     return this.client.request<T.Recording>({ method: "GET", path: `/conversations/${encodeURIComponent(id)}/recording`, query: params }, options);
+  }
+}
+
+export class Campaigns {
+  constructor(private readonly client: Client) {}
+
+  /**
+   * List campaigns.
+   *
+   * Newest first by creation.
+   *
+   * `GET /campaigns`
+   */
+  list(params: T.CampaignsListParams = {}, options?: RequestOptions): PagePromise<T.Campaign> {
+    return this.client.list<T.Campaign>({ method: "GET", path: `/campaigns`, query: params }, options);
+  }
+
+  /**
+   * Create a campaign.
+   *
+   * Asks an agent to contact many people. Every recipient is checked before anything is stored; the first problem is the error, and `param` points at the row (`recipients[12].phone`, `recipients[3].email`, `recipients[7]`, `recipients[0].context`, `recipients[5].contact`). Once a minute, for each running campaign, Yesly starts the next `rate` conversations as ordinary outbound conversations, only inside the agent's contact hours in live mode (test mode ignores hours). The campaign is `scheduled` until `start_at`. A recipient is either an existing contact (`contact`) or the person's details, which find or create the contact when its conversation starts. Live phone numbers must be Spanish mobiles or landlines. Send an `Idempotency-Key`: a retry then never creates two campaigns.
+   *
+   * `POST /campaigns`
+   */
+  create(params: T.CampaignsCreateParams, options?: RequestOptions): Promise<T.Campaign> {
+    return this.client.request<T.Campaign>({ method: "POST", path: `/campaigns`, body: params, idempotent: true }, options);
+  }
+
+  /**
+   * Retrieve a campaign.
+   *
+   * `GET /campaigns/{id}`
+   */
+  retrieve(id: string, options?: RequestOptions): Promise<T.Campaign> {
+    return this.client.request<T.Campaign>({ method: "GET", path: `/campaigns/${encodeURIComponent(id)}` }, options);
+  }
+
+  /**
+   * Pause a campaign.
+   *
+   * Stops starting new conversations; the ones already started go on. Only a `scheduled`, `running` or `waiting` campaign: anything else gets `409` `campaign_not_pausable`. Keys that can write, and members, admins and owners in the dashboard.
+   *
+   * `POST /campaigns/{id}/pause`
+   */
+  pause(id: string, options?: RequestOptions): Promise<T.Campaign> {
+    return this.client.request<T.Campaign>({ method: "POST", path: `/campaigns/${encodeURIComponent(id)}/pause`, idempotent: true }, options);
+  }
+
+  /**
+   * Resume a campaign.
+   *
+   * Starts conversations again where the campaign left off. Only a `paused` campaign: anything else gets `409` `campaign_not_paused`.
+   *
+   * `POST /campaigns/{id}/resume`
+   */
+  resume(id: string, options?: RequestOptions): Promise<T.Campaign> {
+    return this.client.request<T.Campaign>({ method: "POST", path: `/campaigns/${encodeURIComponent(id)}/resume`, idempotent: true }, options);
+  }
+
+  /**
+   * Cancel a campaign.
+   *
+   * Recipients not started become `skipped`; conversations already started go on. Anything but a `cancelled` or `completed` campaign can be cancelled; those get `409` `campaign_not_cancellable`.
+   *
+   * `POST /campaigns/{id}/cancel`
+   */
+  cancel(id: string, options?: RequestOptions): Promise<T.Campaign> {
+    return this.client.request<T.Campaign>({ method: "POST", path: `/campaigns/${encodeURIComponent(id)}/cancel`, idempotent: true }, options);
+  }
+
+  /**
+   * List a campaign's recipients.
+   *
+   * The rows in the order they were sent, row 1 first, with the conversation each one started. A row that started shows the contact's current details (`null` once the contact is erased). Unlike other lists, `starting_after` is a row number: pass the `row` of the last item received.
+   *
+   * `GET /campaigns/{id}/recipients`
+   */
+  listRecipients(id: string, params: T.CampaignsListRecipientsParams = {}, options?: RequestOptions): PagePromise<T.CampaignRecipient> {
+    return this.client.list<T.CampaignRecipient>({ method: "GET", path: `/campaigns/${encodeURIComponent(id)}/recipients`, query: params }, options);
   }
 }
 
@@ -373,7 +452,7 @@ export class Balance {
   /**
    * Retrieve the balance.
    *
-   * Yesly is prepaid. Each SMS, WhatsApp message and email, and each started minute of a call that was picked up, is taken from the balance at your account's prices; calls nobody picks up are free. A message that could not be sent is refunded with an `adjustment`. A live call holds its longest cost (the agent's `max_call_minutes`) until it ends. Top-ups are made by card in the dashboard and cannot be made through the API.
+   * Yesly is prepaid. The balance belongs to your organization: every account in it spends from the same one, and this endpoint returns it whichever account's key you use. Each SMS, WhatsApp message and email, and each started minute of a call that was picked up, is taken from it at your account's prices; calls nobody picks up are free. A message that could not be sent is refunded with an `adjustment`. A live call holds its longest cost (the agent's `max_call_minutes`) until it ends. Top-ups are made by card in the dashboard and cannot be made through the API.
    *
    * `GET /balance`
    */
@@ -384,7 +463,7 @@ export class Balance {
   /**
    * List balance transactions.
    *
-   * Every charge, top-up and adjustment, newest first. Charges point to the agent, the conversation and the message, so you can pass the cost on to an order or a customer.
+   * Every charge and adjustment of your account, newest first. Charges point to the agent, the conversation and the message, so you can pass the cost on to an order or a customer. Top-ups belong to the organization and are listed in the dashboard, with every account's charges.
    *
    * `GET /balance/transactions`
    */
@@ -492,6 +571,7 @@ export function resourcesOf(client: Client) {
     senders: new Senders(client),
     contacts: new Contacts(client),
     conversations: new Conversations(client),
+    campaigns: new Campaigns(client),
     messages: new Messages(client),
     templates: new Templates(client),
     optOuts: new OptOuts(client),
